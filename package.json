@@ -17,10 +17,13 @@
   },
   "scripts": {
     "batch-eval": "node scripts/batch-eval.js",
+    "docker:build": "docker build -t carhome:latest .",
+    "docker:run": "docker run --rm -p 3100:3100 --env-file .env.local carhome:latest",
     "review-checklist": "node scripts/generate-review-checklist.js",
     "reviewed-eval": "node scripts/reviewed-eval.js",
     "review-sync": "node scripts/sync-review-annotations.js",
     "provider:diagnose": "node scripts/provider-diagnose.js",
+    "start:prod": "HOST=0.0.0.0 NODE_ENV=production node server.js",
     "start": "node server.js",
     "self-test": "node scripts/self-test.js",
     "self-test:runtime": "node scripts/runtime-self-test.js",

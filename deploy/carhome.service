@@ -1,0 +1,16 @@
+[Unit]
+Description=carhome web service
+After=network.target
+
+[Service]
+Type=simple
+WorkingDirectory=/opt/carhome
+EnvironmentFile=/opt/carhome/.env
+ExecStart=/usr/bin/env node server.js
+Restart=always
+RestartSec=3
+User=www-data
+Group=www-data
+
+[Install]
+WantedBy=multi-user.target

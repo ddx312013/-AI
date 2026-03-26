@@ -3,104 +3,132 @@
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <title>carhome</title>
+    <title>Car Cutout MVP</title>
     <link rel="stylesheet" href="./styles.css" />
   </head>
   <body>
     <div class="page-shell">
       <header class="hero panel">
-        <div>
-          <p class="eyebrow">carhome</p>
-          <h1>carhome</h1>
-          <p class="hero-copy">
-            上传单张汽车图片，返回结构化 JSON 结果。当前支持 `heuristic | gemini | hybrid`
-            三种模式，默认 `heuristic`，只覆盖 5 类问题：过曝、偏暗、虚图/模糊、背景杂乱、构图异常。
+        <div class="hero-copy">
+          <p class="eyebrow">car cutout mvp</p>
+          <h1>汽车白底商品图</h1>
+          <p>
+            上传一张汽车图片，浏览器端自动做前景分割，再合成接近参考图风格的白底商品图：
+            主体居中放大、底部黑影自然、适合做车源封面和素材图。
           </p>
         </div>
         <div class="hero-meta">
-          <span class="badge badge-accent">零依赖 baseline</span>
-          <span class="badge">Gemini 可插拔</span>
-          <span class="badge">结构化 JSON</span>
+          <span class="badge badge-accent">本地处理</span>
+          <span class="badge badge-accent">白底商品图</span>
+          <span class="badge badge-accent">修边后导出</span>
         </div>
       </header>
 
       <main class="layout">
-        <section class="panel upload-panel">
+        <section class="panel control-panel">
           <div class="panel-heading">
-            <h2>上传检测</h2>
-            <p>`heuristic` 只走本地服务；`gemini / hybrid` 会调用 Gemini API。</p>
-          </div>
-
-          <div class="mode-stack">
-            <label class="mode-field" for="analyzer-select">
-              <span>分析模式</span>
-              <select id="analyzer-select">
-                <option value="heuristic">heuristic</option>
-                <option value="gemini">gemini</option>
-                <option value="hybrid">hybrid</option>
-              </select>
-            </label>
-            <p id="mode-copy" class="mode-copy">仅跑本地启发式 baseline，无需 Gemini key。</p>
-            <p id="capability-copy" class="mode-capability">读取服务端能力中...</p>
+            <div>
+              <h2>上传与参数</h2>
+              <p>先上传图片，服务端会调用真实抠图 API，再按需做修边和商品图排版。</p>
+            </div>
           </div>
 
           <label class="dropzone" id="dropzone" for="image-input">
             <input id="image-input" type="file" accept="image/*" />
-            <span class="dropzone-kicker">拖拽图片到这里，或点击选择文件</span>
-            <span class="dropzone-copy">支持 JPG / PNG / WEBP 等浏览器可解码格式，仅单张。</span>
+            <span class="dropzone-title">拖拽汽车图片到这里，或点击选择文件</span>
+            <span class="dropzone-copy">建议使用主体完整、边缘清晰的 JPG / PNG / WEBP。</span>
           </label>
 
           <div class="status-row">
             <div id="status-pill" class="status-pill">等待上传</div>
-            <button id="reanalyze-button" class="ghost-button" type="button" disabled>重新分析当前图片</button>
+            <button id="process-button" class="ghost-button" type="button" disabled>重新抠图</button>
           </div>
 
-          <div class="issue-list">
-            <span class="badge badge-problem">过曝</span>
-            <span class="badge badge-problem">偏暗</span>
-            <span class="badge badge-problem">虚图 / 模糊</span>
-            <span class="badge badge-problem">背景杂乱</span>
-            <span class="badge badge-problem">构图异常</span>
+          <div class="field-grid">
+            <label class="range-field" for="aggressiveness-range">
+              <span>背景识别强度</span>
+              <input id="aggressiveness-range" type="range" min="18" max="72" step="1" value="36" />
+              <strong id="aggressiveness-value">36</strong>
+            </label>
+
+            <label class="range-field" for="feather-range">
+              <span>边缘羽化</span>
+              <input id="feather-range" type="range" min="0" max="8" step="1" value="2" />
+              <strong id="feather-value">2 px</strong>
+            </label>
+
+            <label class="range-field" for="brush-size-range">
+              <span>修边画笔大小</span>
+              <input id="brush-size-range" type="range" min="8" max="96" step="1" value="28" />
+              <strong id="brush-size-value">28 px</strong>
+            </label>
+          </div>
+
+          <div class="tool-row">
+            <button id="erase-button" class="ghost-button is-active" type="button">擦除背景</button>
+            <button id="restore-button" class="ghost-button" type="button">恢复车身</button>
+            <button id="undo-button" class="ghost-button" type="button" disabled>撤销一步</button>
+          </div>
+
+          <div class="helper-card">
+            <h3>适合场景</h3>
+            <p>白墙、展厅、停车位、门店前景等背景较统一的车图。</p>
+          </div>
+
+          <div class="helper-card">
+            <h3>当前限制</h3>
+            <p>需要先在服务端配置真实抠图 API key；复杂遮挡或细碎反光区域仍可能需要继续人工修边。</p>
           </div>
         </section>
 
         <section class="panel preview-panel">
           <div class="panel-heading">
-            <h2>图片预览</h2>
-            <p id="image-meta">尚未选择图片</p>
+            <div>
+              <h2>预览</h2>
+              <p id="image-meta">尚未选择图片</p>
+            </div>
+            <a id="download-link" class="primary-button is-disabled" href="/" download="car-studio.png" aria-disabled="true">
+              下载商品图 PNG
+            </a>
           </div>
-          <div class="preview-frame">
-            <img id="preview-image" alt="上传预览" hidden />
-            <div id="preview-placeholder" class="preview-placeholder">等待图片</div>
+
+          <div class="preview-grid">
+            <div class="preview-card">
+              <div class="preview-label">原图</div>
+              <div class="preview-frame">
+                <img id="source-image" alt="原图预览" hidden />
+                <div id="source-placeholder" class="preview-placeholder">等待图片</div>
+              </div>
+            </div>
+
+            <div class="preview-card">
+              <div class="preview-label">修边画布</div>
+              <div id="editor-frame" class="preview-frame checkerboard editor-frame">
+                <canvas id="edit-canvas" hidden></canvas>
+                <div id="result-placeholder" class="preview-placeholder">等待抠图结果</div>
+              </div>
+            </div>
+
+            <div class="preview-card preview-card-wide">
+              <div class="preview-label">商品图效果</div>
+              <div class="preview-frame studio-frame">
+                <canvas id="studio-canvas" hidden></canvas>
+                <div id="studio-placeholder" class="preview-placeholder">等待商品图效果</div>
+              </div>
+            </div>
           </div>
         </section>
 
         <section class="panel result-panel">
           <div class="panel-heading">
-            <h2>审核结果</h2>
-            <p>结构包含 `scene / view_angle / focus_part / decision / review_recommendation / runtime / issues / out_of_scope_note`，其中 `decision` 支持 `out_of_scope`。</p>
+            <div>
+              <h2>结果说明</h2>
+              <p>这里会显示本次分割的主体占比、边缘像素量和背景置信度。</p>
+            </div>
           </div>
-          <div id="summary-card" class="summary-card empty">
-            上传图片后显示结果
-          </div>
-          <div id="tag-strip" class="tag-strip"></div>
-          <div id="reason-list" class="reason-list"></div>
-        </section>
 
-        <section class="panel metrics-panel">
-          <div class="panel-heading">
-            <h2>关键指标</h2>
-            <p>用于解释当前启发式判定，不代表最终生产指标体系。</p>
-          </div>
-          <div id="metrics-grid" class="metrics-grid"></div>
-          <div id="detail-grid" class="detail-grid"></div>
-        </section>
-
-        <section class="panel json-panel">
-          <div class="panel-heading">
-            <h2>JSON 结果</h2>
-            <p>可直接复制给后端或标注流程做联调。</p>
-          </div>
+          <div id="summary-card" class="summary-card empty">上传图片后显示结果摘要</div>
+          <div id="metric-strip" class="metric-strip"></div>
           <pre id="json-output" class="json-output">{
   "status": "idle"
 }</pre>

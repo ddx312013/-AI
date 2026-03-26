@@ -1,0 +1,20 @@
+services:
+  - type: web
+    name: carhome
+    runtime: node
+    plan: starter
+    autoDeploy: true
+    buildCommand: npm install
+    startCommand: npm run start:prod
+    healthCheckPath: /health
+    envVars:
+      - key: HOST
+        value: 0.0.0.0
+      - key: NODE_ENV
+        value: production
+      - key: PORT
+        value: 10000
+      - key: PHOTOROOM_API_KEY
+        sync: false
+      - key: REMOVE_BG_API_KEY
+        sync: false

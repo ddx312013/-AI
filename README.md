@@ -1,6 +1,18 @@
 # carhome
 
-`carhome` 是一个可直接运行的汽车图片图审 MVP，统一输出结构化 JSON，支持三种模式：
+`carhome` 现在已经扩展成一个可直接运行的汽车白底商品图 MVP：
+
+- 透明抠图
+- 白底商品图生成
+- 团队内网页面使用
+- 可选 Gemini 图审能力保留
+
+部署说明见 [docs/DEPLOY.md](docs/DEPLOY.md)。
+Render 一键托管说明见 [docs/RENDER.md](docs/RENDER.md)。
+服务器上线清单见 [docs/RELEASE_CHECKLIST.md](docs/RELEASE_CHECKLIST.md)。
+Ubuntu 运维命令清单见 [docs/OPS_UBUNTU.md](docs/OPS_UBUNTU.md)。
+
+旧的图审能力仍然保留，统一输出结构化 JSON，支持三种模式：
 
 - `heuristic`：纯启发式 baseline，无需 key，当前默认模式
 - `gemini`：直接调用 Gemini 视觉分析
@@ -44,6 +56,38 @@
 
 - Node.js 18+
 
+## 配置商品图 / 抠图 API
+
+项目根目录可放 `.env` 或 `.env.local`：
+
+```bash
+HOST=0.0.0.0
+PORT=3100
+NODE_ENV=production
+PHOTOROOM_API_KEY=your_photoroom_api_key
+PHOTOROOM_ENDPOINT=https://image-api.photoroom.com/v2/edit
+REMOVE_BG_API_KEY=your_remove_bg_api_key
+REMOVE_BG_ENDPOINT=https://api.remove.bg/v1.0/removebg
+REMOVE_BG_SIZE=auto
+REMOVE_BG_FORMAT=png
+```
+
+说明：
+
+- `PHOTOROOM_API_KEY`：推荐的商品图 / 抠图主 provider
+- `PHOTOROOM_ENDPOINT`：Photoroom 接口地址
+- `REMOVE_BG_API_KEY`：备用抠图服务 key，当前内置 `remove.bg`
+- `REMOVE_BG_ENDPOINT`：抠图服务地址，默认官方 remove.bg 接口
+- `REMOVE_BG_SIZE`：输出尺寸，默认 `auto`
+- `REMOVE_BG_FORMAT`：输出格式，默认 `png`
+
+当前链路：
+
+- `POST /api/cutout`：优先走 `Photoroom` 抠图，未配置时回退到 `remove.bg`
+- `POST /api/studio`：走 `Photoroom` 商品图生成
+
+如果是团队使用，优先只配 `PHOTOROOM_API_KEY` 即可。
+
 ## 配置 Gemini
 
 项目根目录可放 `.env` 或 `.env.local`。建议从 `.env.example` 开始：
@@ -86,6 +130,14 @@ cd carhome
 npm start
 ```
 
+生产启动：
+
+```bash
+npm run start:prod
+```
+
+如果你想直接交付给运营团队，而不自己维护服务器，推荐直接按 [docs/RENDER.md](docs/RENDER.md) 部署到 Render。
+
 默认地址：
 
 ```text
@@ -102,9 +154,9 @@ curl http://127.0.0.1:3100/api/config
 页面使用：
 
 1. 打开 `http://127.0.0.1:3100`
-2. 默认是 `heuristic`，也可切到 `gemini` / `hybrid`
-3. 上传单张图片
-4. 查看结构化 JSON、启发式指标、Gemini 总结和 fallback 信息
+2. 上传单张汽车图片
+3. 查看原图、修边画布、商品图效果
+4. 下载 PNG 成品图
 
 ## 自测
 

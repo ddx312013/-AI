@@ -7,6 +7,12 @@ import { loadProjectEnv } from "./lib/env.js";
 loadProjectEnv(new URL(".", import.meta.url).pathname);
 
 const { getAnalyzerRuntimeConfig, runAnalysisPipeline } = await import("./lib/analyzers.js");
+const { getRemoveBgRuntimeConfig, removeImageBackground } = await import("./lib/remove-bg-provider.js");
+const {
+  getPhotoroomRuntimeConfig,
+  removeBackgroundWithPhotoroom,
+  renderStudioWithPhotoroom
+} = await import("./lib/photoroom-provider.js");
 const DEFAULT_ANALYZER_MODE = getAnalyzerRuntimeConfig().default_mode || "heuristic";
 
 const HOST = process.env.HOST || "127.0.0.1";
@@ -123,6 +129,79 @@ async function handleAnalyze(request, response) {
   }
 }
 
+function mapCutoutPayload(payload) {
+  const image = payload?.image || {};
+
+  return {
+    base64: image.original_base64 || null,
+    fileName: image.name || "uploaded-image",
+    mimeType: image.mime_type || "image/jpeg"
+  };
+}
+
+async function handleCutout(request, response) {
+  if (request.method !== "POST") {
+    sendMethodNotAllowed(response);
+    return;
+  }
+
+  try {
+    const payload = mapCutoutPayload(await parseJsonBody(request));
+    if (!payload.base64) {
+      throw new Error("Missing image.original_base64 payload.");
+    }
+
+    const startedAt = performance.now();
+    const photoroom = getPhotoroomRuntimeConfig();
+    const result = photoroom.configured ? await removeBackgroundWithPhotoroom(payload) : await removeImageBackground(payload);
+    sendJson(response, 200, {
+      image: {
+        base64: result.resultBase64,
+        mime_type: result.mimeType
+      },
+      provider: result.provider,
+      runtime: {
+        elapsed_ms: Math.round(performance.now() - startedAt)
+      }
+    });
+  } catch (error) {
+    sendJson(response, 400, {
+      error: error instanceof Error ? error.message : "抠图失败。"
+    });
+  }
+}
+
+async function handleStudio(request, response) {
+  if (request.method !== "POST") {
+    sendMethodNotAllowed(response);
+    return;
+  }
+
+  try {
+    const payload = mapCutoutPayload(await parseJsonBody(request));
+    if (!payload.base64) {
+      throw new Error("Missing image.original_base64 payload.");
+    }
+
+    const startedAt = performance.now();
+    const result = await renderStudioWithPhotoroom(payload);
+    sendJson(response, 200, {
+      image: {
+        base64: result.resultBase64,
+        mime_type: result.mimeType
+      },
+      provider: result.provider,
+      runtime: {
+        elapsed_ms: Math.round(performance.now() - startedAt)
+      }
+    });
+  } catch (error) {
+    sendJson(response, 400, {
+      error: error instanceof Error ? error.message : "商品图生成失败。"
+    });
+  }
+}
+
 function sanitizePublicPath(urlPathname) {
   const safePath = normalize(decodeURIComponent(urlPathname)).replace(/^(\.\.[/\\])+/, "");
   const candidatePath = resolve(PUBLIC_DIR, `.${safePath}`);
@@ -151,6 +230,8 @@ const server = createServer(async (request, response) => {
   if (url.pathname === "/health") {
     sendJson(response, 200, {
       analyzer: getAnalyzerRuntimeConfig(),
+      photoroom: getPhotoroomRuntimeConfig(),
+      cutout: getRemoveBgRuntimeConfig(),
       service: "carhome",
       status: "ok"
     });
@@ -159,7 +240,9 @@ const server = createServer(async (request, response) => {
 
   if (url.pathname === "/api/config" || url.pathname === "/api/runtime-config") {
     sendJson(response, 200, {
-      analyzer: getAnalyzerRuntimeConfig()
+      analyzer: getAnalyzerRuntimeConfig(),
+      photoroom: getPhotoroomRuntimeConfig(),
+      cutout: getRemoveBgRuntimeConfig()
     });
     return;
   }
@@ -169,11 +252,35 @@ const server = createServer(async (request, response) => {
     return;
   }
 
+  if (url.pathname === "/api/cutout") {
+    await handleCutout(request, response);
+    return;
+  }
+
+  if (url.pathname === "/api/studio") {
+    await handleStudio(request, response);
+    return;
+  }
+
   await serveStatic(response, url);
 });
 
 server.listen(PORT, HOST, () => {
   console.log(`carhome listening on http://${HOST}:${PORT}`);
 });
+
+function shutdown(signal) {
+  console.log(`Received ${signal}, shutting down carhome...`);
+  server.close(() => {
+    process.exit(0);
+  });
+
+  setTimeout(() => {
+    process.exit(1);
+  }, 10000).unref();
+}
+
+process.on("SIGINT", () => shutdown("SIGINT"));
+process.on("SIGTERM", () => shutdown("SIGTERM"));
 
 export { server };

@@ -2,7 +2,7 @@ services:
   - type: web
     name: carhome
     runtime: node
-    plan: starter
+    plan: free
     autoDeploy: true
     buildCommand: npm install
     startCommand: npm run start:prod

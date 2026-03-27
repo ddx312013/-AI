@@ -10,6 +10,7 @@ const brushSizeValue = document.querySelector("#brush-size-value");
 const eraseButton = document.querySelector("#erase-button");
 const restoreButton = document.querySelector("#restore-button");
 const undoButton = document.querySelector("#undo-button");
+const templateModeInputs = Array.from(document.querySelectorAll('input[name="template-mode"]'));
 const statusPill = document.querySelector("#status-pill");
 const sourceImage = document.querySelector("#source-image");
 const sourcePlaceholder = document.querySelector("#source-placeholder");
@@ -33,6 +34,27 @@ const previewCanvas = document.createElement("canvas");
 const previewContext = previewCanvas.getContext("2d", { willReadFrequently: true });
 const editContext = editCanvas.getContext("2d", { willReadFrequently: true });
 const studioContext = studioCanvas.getContext("2d", { willReadFrequently: true });
+const analysisCanvas = document.createElement("canvas");
+const analysisContext = analysisCanvas.getContext("2d", { willReadFrequently: true });
+
+const STUDIO_TEMPLATE = {
+  width: 3840,
+  height: 2880,
+  variants: {
+    compact: {
+      subjectBox: { x: 0.13, y: 0.19, width: 0.72, height: 0.45 },
+      padding: { x: 0.06, top: 0.07, bottom: 0.08 }
+    },
+    medium: {
+      subjectBox: { x: 0.11, y: 0.18, width: 0.78, height: 0.48 },
+      padding: { x: 0.07, top: 0.08, bottom: 0.09 }
+    },
+    large: {
+      subjectBox: { x: 0.09, y: 0.17, width: 0.82, height: 0.5 },
+      padding: { x: 0.08, top: 0.09, bottom: 0.1 }
+    }
+  }
+};
 
 let currentFile = null;
 let currentSourceUrl = null;
@@ -45,6 +67,7 @@ let currentBackground = null;
 let currentThreshold = null;
 let currentEdgeThreshold = null;
 let currentStudioApiDataUrl = null;
+let currentTemplateMode = "auto";
 let brushMode = "erase";
 let isPainting = false;
 let undoStack = [];
@@ -947,18 +970,105 @@ function boostStudioShadow(targetContext, bbox, canvasWidth, canvasHeight) {
   void canvasHeight;
 }
 
+function detectCanvasContentBoundingBox(sourceCanvas) {
+  analysisCanvas.width = sourceCanvas.width;
+  analysisCanvas.height = sourceCanvas.height;
+  analysisContext.clearRect(0, 0, analysisCanvas.width, analysisCanvas.height);
+  analysisContext.drawImage(sourceCanvas, 0, 0);
+
+  const { data, width, height } = analysisContext.getImageData(0, 0, analysisCanvas.width, analysisCanvas.height);
+  const mask = new Uint8Array(width * height);
+
+  for (let index = 0; index < mask.length; index += 1) {
+    const offset = index * 4;
+    const alpha = data[offset + 3];
+    const whiteDistance =
+      Math.abs(255 - data[offset]) + Math.abs(255 - data[offset + 1]) + Math.abs(255 - data[offset + 2]);
+    mask[index] = alpha > 10 && (alpha < 248 || whiteDistance > 26) ? 1 : 0;
+  }
+
+  return getBoundingBox(mask, width, height);
+}
+
+function pickStudioTemplateVariant(bbox) {
+  if (currentTemplateMode !== "auto") {
+    return STUDIO_TEMPLATE.variants[currentTemplateMode] || STUDIO_TEMPLATE.variants.medium;
+  }
+
+  if (!bbox) {
+    return STUDIO_TEMPLATE.variants.medium;
+  }
+
+  const aspectRatio = bbox.width / Math.max(1, bbox.height);
+  if (aspectRatio >= 2.2) {
+    return STUDIO_TEMPLATE.variants.compact;
+  }
+  if (aspectRatio >= 1.85) {
+    return STUDIO_TEMPLATE.variants.medium;
+  }
+  return STUDIO_TEMPLATE.variants.large;
+}
+
+function resolveStudioPlacement(targetWidth, targetHeight, sourceCanvas, bbox) {
+  const safeBox =
+    bbox || {
+      x: 0,
+      y: 0,
+      width: sourceCanvas.width,
+      height: sourceCanvas.height
+    };
+  const variant = pickStudioTemplateVariant(safeBox);
+  const padX = Math.round(safeBox.width * variant.padding.x);
+  const padTop = Math.round(safeBox.height * variant.padding.top);
+  const padBottom = Math.round(safeBox.height * variant.padding.bottom);
+  const cropX = Math.max(0, safeBox.x - padX);
+  const cropY = Math.max(0, safeBox.y - padTop);
+  const cropWidth = Math.min(sourceCanvas.width - cropX, safeBox.width + padX * 2);
+  const cropHeight = Math.min(sourceCanvas.height - cropY, safeBox.height + padTop + padBottom);
+  const subjectBox = {
+    x: targetWidth * variant.subjectBox.x,
+    y: targetHeight * variant.subjectBox.y,
+    width: targetWidth * variant.subjectBox.width,
+    height: targetHeight * variant.subjectBox.height
+  };
+  const scale = Math.min(subjectBox.width / cropWidth, subjectBox.height / cropHeight);
+  const drawWidth = cropWidth * scale;
+  const drawHeight = cropHeight * scale;
+
+  return {
+    crop: {
+      x: cropX,
+      y: cropY,
+      width: cropWidth,
+      height: cropHeight
+    },
+    draw: {
+      x: subjectBox.x + (subjectBox.width - drawWidth) / 2,
+      y: subjectBox.y + (subjectBox.height - drawHeight) / 2,
+      width: drawWidth,
+      height: drawHeight,
+      scale
+    }
+  };
+}
+
 async function renderStudioFromApi(dataUrl, bbox) {
   const image = await loadImage(dataUrl);
-  const scaledBox = bbox ? scaleBoundingBox(bbox, currentImageData.width, currentImageData.height, image.naturalWidth, image.naturalHeight) : null;
+  analysisCanvas.width = image.naturalWidth;
+  analysisCanvas.height = image.naturalHeight;
+  analysisContext.clearRect(0, 0, analysisCanvas.width, analysisCanvas.height);
+  analysisContext.drawImage(image, 0, 0);
+  const apiBox =
+    detectCanvasContentBoundingBox(analysisCanvas) ||
+    (bbox ? scaleBoundingBox(bbox, currentImageData.width, currentImageData.height, image.naturalWidth, image.naturalHeight) : null);
 
-  exportCanvas.width = image.naturalWidth;
-  exportCanvas.height = image.naturalHeight;
+  exportCanvas.width = STUDIO_TEMPLATE.width;
+  exportCanvas.height = STUDIO_TEMPLATE.height;
   exportContext.clearRect(0, 0, exportCanvas.width, exportCanvas.height);
-  exportContext.drawImage(image, 0, 0);
-  boostStudioShadow(exportContext, scaledBox, exportCanvas.width, exportCanvas.height);
+  renderStudioComposite(exportContext, exportCanvas.width, exportCanvas.height, analysisCanvas, apiBox, { drawShadow: false });
 
-  studioCanvas.width = image.naturalWidth;
-  studioCanvas.height = image.naturalHeight;
+  studioCanvas.width = STUDIO_TEMPLATE.width;
+  studioCanvas.height = STUDIO_TEMPLATE.height;
   studioCanvas.hidden = false;
   studioPlaceholder.hidden = true;
   studioContext.clearRect(0, 0, studioCanvas.width, studioCanvas.height);
@@ -983,11 +1093,10 @@ function buildCutoutCanvas(image, alphaMask, sourceWidth, sourceHeight) {
   cutoutContext.putImageData(fullSize, 0, 0);
 }
 
-function renderStudioComposite(targetContext, targetWidth, targetHeight, sourceCanvas, bbox) {
+function renderStudioComposite(targetContext, targetWidth, targetHeight, sourceCanvas, bbox, options = {}) {
   targetContext.clearRect(0, 0, targetWidth, targetHeight);
   targetContext.fillStyle = "#ffffff";
   targetContext.fillRect(0, 0, targetWidth, targetHeight);
-
   const safeBox =
     bbox || {
       x: 0,
@@ -995,32 +1104,27 @@ function renderStudioComposite(targetContext, targetWidth, targetHeight, sourceC
       width: sourceCanvas.width,
       height: sourceCanvas.height
     };
-  const padX = Math.round(safeBox.width * 0.12);
-  const padTop = Math.round(safeBox.height * 0.14);
-  const padBottom = Math.round(safeBox.height * 0.12);
-  const cropX = Math.max(0, safeBox.x - padX);
-  const cropY = Math.max(0, safeBox.y - padTop);
-  const cropWidth = Math.min(sourceCanvas.width - cropX, safeBox.width + padX * 2);
-  const cropHeight = Math.min(sourceCanvas.height - cropY, safeBox.height + padTop + padBottom);
-  const scale = Math.min((targetWidth * 0.9) / cropWidth, (targetHeight * 0.68) / cropHeight);
-  const drawWidth = cropWidth * scale;
-  const drawHeight = cropHeight * scale;
-  const drawX = (targetWidth - drawWidth) / 2;
-  const drawY = targetHeight * 0.13;
+  const placement = resolveStudioPlacement(targetWidth, targetHeight, sourceCanvas, safeBox);
 
-  drawNaturalShadow(
-    targetContext,
+  if (options.drawShadow !== false) {
+    drawNaturalShadow(targetContext, sourceCanvas, safeBox, placement.crop, {
+      x: placement.draw.x,
+      y: placement.draw.y,
+      scale: placement.draw.scale
+    });
+  }
+
+  targetContext.drawImage(
     sourceCanvas,
-    safeBox,
-    { x: cropX, y: cropY },
-    {
-      x: drawX,
-      y: drawY,
-      scale
-    }
+    placement.crop.x,
+    placement.crop.y,
+    placement.crop.width,
+    placement.crop.height,
+    placement.draw.x,
+    placement.draw.y,
+    placement.draw.width,
+    placement.draw.height
   );
-
-  targetContext.drawImage(sourceCanvas, cropX, cropY, cropWidth, cropHeight, drawX, drawY, drawWidth, drawHeight);
 }
 
 function scaleBoundingBox(bbox, sourceWidth, sourceHeight, targetWidth, targetHeight) {
@@ -1037,8 +1141,8 @@ function scaleBoundingBox(bbox, sourceWidth, sourceHeight, targetWidth, targetHe
 }
 
 function buildStudioCanvas(bbox) {
-  const width = 1600;
-  const height = 1200;
+  const width = STUDIO_TEMPLATE.width;
+  const height = STUDIO_TEMPLATE.height;
   const scaledBox = scaleBoundingBox(bbox, currentImageData.width, currentImageData.height, cutoutCanvas.width, cutoutCanvas.height);
   exportCanvas.width = width;
   exportCanvas.height = height;
@@ -1105,6 +1209,13 @@ async function commitRender(isEdited = false) {
   });
   renderSummary(summary);
   renderJson(summary);
+}
+
+async function handleTemplateModeChange(event) {
+  currentTemplateMode = event.target.value;
+  if (currentImageElement && currentImageData && currentAlphaMask) {
+    await commitRender(false);
+  }
 }
 
 function getCanvasPoint(event) {
@@ -1315,6 +1426,10 @@ undoButton.addEventListener("click", async () => {
   updateUndoState();
   await commitRender(true);
   setStatus("已撤销上一步修边。", "success");
+});
+
+templateModeInputs.forEach((input) => {
+  input.addEventListener("change", handleTemplateModeChange);
 });
 
 aggressivenessRange.addEventListener("input", updateRangeLabels);

@@ -3,15 +3,15 @@
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <title>Car Cutout MVP</title>
+    <title>AutoCut 车图工作台</title>
     <link rel="stylesheet" href="./styles.css" />
   </head>
   <body>
     <div class="page-shell">
       <header class="hero panel">
         <div class="hero-copy">
-          <p class="eyebrow">car cutout mvp</p>
-          <h1>汽车白底商品图</h1>
+          <p class="eyebrow">AutoCut Workspace</p>
+          <h1>AutoCut 车图工作台</h1>
           <p>
             上传一张汽车图片，浏览器端自动做前景分割，再合成接近参考图风格的白底商品图：
             主体居中放大、底部黑影自然、适合做车源封面和素材图。
@@ -70,6 +70,29 @@
             <button id="undo-button" class="ghost-button" type="button" disabled>撤销一步</button>
           </div>
 
+          <div class="template-card">
+            <h3>导出规格</h3>
+            <p>统一按模版导出 `3840 × 2880`，可手动指定车体大小和留白。</p>
+            <div class="segmented-row" id="template-mode-group">
+              <label class="segmented-option">
+                <input type="radio" name="template-mode" value="auto" checked />
+                <span>自动</span>
+              </label>
+              <label class="segmented-option">
+                <input type="radio" name="template-mode" value="large" />
+                <span>大型车</span>
+              </label>
+              <label class="segmented-option">
+                <input type="radio" name="template-mode" value="medium" />
+                <span>中型车</span>
+              </label>
+              <label class="segmented-option">
+                <input type="radio" name="template-mode" value="compact" />
+                <span>小型车</span>
+              </label>
+            </div>
+          </div>
+
           <div class="helper-card">
             <h3>适合场景</h3>
             <p>白墙、展厅、停车位、门店前景等背景较统一的车图。</p>
@@ -87,7 +110,7 @@
               <h2>预览</h2>
               <p id="image-meta">尚未选择图片</p>
             </div>
-            <a id="download-link" class="primary-button is-disabled" href="/" download="car-studio.png" aria-disabled="true">
+            <a id="download-link" class="primary-button is-disabled" href="/" download="autocut-car-studio.png" aria-disabled="true">
               下载商品图 PNG
             </a>
           </div>

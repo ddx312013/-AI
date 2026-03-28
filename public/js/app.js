@@ -218,8 +218,68 @@ function hexToRgb(hex) {
   };
 }
 
+function getCanvas2DContext(canvas) {
+  return canvas.getContext("2d", { willReadFrequently: true });
+}
+
+function isolatePrimarySubjectCanvas(sourceCanvas) {
+  const context = getCanvas2DContext(sourceCanvas);
+  if (!context) {
+    return {
+      canvas: sourceCanvas,
+      bbox: detectCanvasContentBoundingBox(sourceCanvas)
+    };
+  }
+
+  const { width, height } = sourceCanvas;
+  const imageData = context.getImageData(0, 0, width, height);
+  const mask = new Uint8Array(width * height);
+
+  for (let index = 0; index < mask.length; index += 1) {
+    mask[index] = imageData.data[index * 4 + 3] > 18 ? 1 : 0;
+  }
+
+  const primaryForeground = keepLargestForeground(new Uint8Array(mask.map((value) => (value ? 0 : 1))), width, height);
+  const bbox = getBoundingBox(primaryForeground, width, height);
+  if (!bbox) {
+    return {
+      canvas: sourceCanvas,
+      bbox: detectCanvasContentBoundingBox(sourceCanvas)
+    };
+  }
+
+  const sanitizedCanvas = document.createElement("canvas");
+  sanitizedCanvas.width = width;
+  sanitizedCanvas.height = height;
+  const sanitizedContext = getCanvas2DContext(sanitizedCanvas);
+  const sanitizedImage = new ImageData(width, height);
+
+  for (let index = 0; index < primaryForeground.length; index += 1) {
+    if (!primaryForeground[index]) {
+      continue;
+    }
+    const offset = index * 4;
+    sanitizedImage.data[offset] = imageData.data[offset];
+    sanitizedImage.data[offset + 1] = imageData.data[offset + 1];
+    sanitizedImage.data[offset + 2] = imageData.data[offset + 2];
+    sanitizedImage.data[offset + 3] = imageData.data[offset + 3];
+  }
+
+  sanitizedContext.putImageData(sanitizedImage, 0, 0);
+
+  return {
+    canvas: sanitizedCanvas,
+    bbox
+  };
+}
+
 function drawNaturalShadow(context, sourceCanvas, box, crop, drawRect) {
   if (!box) {
+    return;
+  }
+
+  const sourceContext = getCanvas2DContext(sourceCanvas);
+  if (!sourceContext) {
     return;
   }
 
@@ -231,8 +291,8 @@ function drawNaturalShadow(context, sourceCanvas, box, crop, drawRect) {
   const drawTop = drawRect.y + localY * drawRect.scale;
   const drawBottom = drawRect.y + (localY + localHeight) * drawRect.scale;
   const baseWidth = localWidth * drawRect.scale;
-  const baseHeight = Math.max(20, localHeight * drawRect.scale * 0.1);
-  const imageData = cutoutContext.getImageData(localX, localY, localWidth, localHeight);
+  const baseHeight = Math.max(14, localHeight * drawRect.scale * 0.07);
+  const imageData = sourceContext.getImageData(localX, localY, localWidth, localHeight);
   const alpha = imageData.data;
   const contactRow = new Int32Array(localWidth);
   const columnWeight = new Float32Array(localWidth);
@@ -300,32 +360,35 @@ function drawNaturalShadow(context, sourceCanvas, box, crop, drawRect) {
   const blurFactor = clamp01(currentShadowSettings.blur);
   const lengthFactor = clamp01(currentShadowSettings.length);
   const verticalOffset = currentShadowSettings.offset;
-  const groundY = drawBottom - baseHeight * 0.03 + verticalOffset;
-  const leftGroundY = groundY + baseHeight * 0.05;
-  const rightGroundY = groundY - baseHeight * 0.02;
   const contourStart = Math.max(0, Math.floor(leftWheel.x - localWidth * 0.18));
   const contourEnd = Math.min(localWidth - 1, Math.ceil(rightWheel.x + localWidth * 0.14));
-  const skewStrength = baseWidth * (0.02 + lengthFactor * 0.08) * direction;
-  const mainBlur = 4 + blurFactor * 12;
-  const ambientBlur = 12 + blurFactor * 24;
-  const wheelBlur = 3 + blurFactor * 8;
-  const midBlur = 6 + blurFactor * 10;
-  const tailDepth = baseHeight * (0.12 + lengthFactor * 0.28);
-  const tailLift = baseHeight * (0.06 + lengthFactor * 0.14);
-  const ambientWidth = baseWidth * (0.16 + lengthFactor * 0.22);
-  const ambientHeight = baseHeight * (0.12 + lengthFactor * 0.22);
+  const contactAverage =
+    Array.from(smoothedContactRow.slice(contourStart, contourEnd + 1)).reduce((sum, value) => sum + value, 0) /
+    Math.max(1, contourEnd - contourStart + 1);
+  const groundY = drawTop + contactAverage * drawRect.scale + baseHeight * 0.08 + verticalOffset;
+  const leftGroundY = drawTop + smoothedContactRow[Math.round(leftWheel.x)] * drawRect.scale + verticalOffset;
+  const rightGroundY = drawTop + smoothedContactRow[Math.round(rightWheel.x)] * drawRect.scale + verticalOffset;
+  const skewStrength = baseWidth * (0.015 + lengthFactor * 0.045) * direction;
+  const mainBlur = 2 + blurFactor * 7;
+  const ambientBlur = 8 + blurFactor * 16;
+  const wheelBlur = 2 + blurFactor * 6;
+  const midBlur = 4 + blurFactor * 8;
+  const tailDepth = baseHeight * (0.06 + lengthFactor * 0.14);
+  const tailLift = baseHeight * (0.03 + lengthFactor * 0.08);
+  const ambientWidth = baseWidth * (0.12 + lengthFactor * 0.14);
+  const ambientHeight = baseHeight * (0.08 + lengthFactor * 0.12);
 
   context.save();
   context.filter = `blur(${mainBlur}px)`;
-  const mainShadowGradient = context.createLinearGradient(0, drawBottom - baseHeight * 0.05, 0, drawBottom + baseHeight * 1.05);
-  mainShadowGradient.addColorStop(0, `rgba(${rgb.red}, ${rgb.green}, ${rgb.blue}, ${0.18 + strength * 0.24})`);
-  mainShadowGradient.addColorStop(0.38, `rgba(${rgb.red}, ${rgb.green}, ${rgb.blue}, ${0.10 + strength * 0.12})`);
+  const mainShadowGradient = context.createLinearGradient(0, groundY - baseHeight * 0.2, 0, groundY + baseHeight * 0.9);
+  mainShadowGradient.addColorStop(0, `rgba(${rgb.red}, ${rgb.green}, ${rgb.blue}, ${0.2 + strength * 0.22})`);
+  mainShadowGradient.addColorStop(0.42, `rgba(${rgb.red}, ${rgb.green}, ${rgb.blue}, ${0.09 + strength * 0.1})`);
   mainShadowGradient.addColorStop(1, `rgba(${rgb.red}, ${rgb.green}, ${rgb.blue}, 0)`);
   context.fillStyle = mainShadowGradient;
   context.beginPath();
   for (let x = contourStart; x <= contourEnd; x += 1) {
     const px = drawLeft + x * drawRect.scale;
-    const py = drawTop + smoothedContactRow[x] * drawRect.scale + baseHeight * 0.015;
+    const py = drawTop + smoothedContactRow[x] * drawRect.scale + baseHeight * 0.015 + verticalOffset;
     if (x === contourStart) {
       context.moveTo(px, py);
     } else {
@@ -343,16 +406,16 @@ function drawNaturalShadow(context, sourceCanvas, box, crop, drawRect) {
   context.restore();
 
   context.save();
-  context.globalAlpha = 0.08 + strength * 0.08;
+  context.globalAlpha = 0.05 + strength * 0.05;
   context.filter = `blur(${ambientBlur}px)`;
   const ambientShadowGradient = context.createLinearGradient(0, groundY, 0, groundY + baseHeight * 1.6);
-  ambientShadowGradient.addColorStop(0, `rgba(${rgb.red}, ${rgb.green}, ${rgb.blue}, ${0.10 + strength * 0.08})`);
+  ambientShadowGradient.addColorStop(0, `rgba(${rgb.red}, ${rgb.green}, ${rgb.blue}, ${0.08 + strength * 0.06})`);
   ambientShadowGradient.addColorStop(1, `rgba(${rgb.red}, ${rgb.green}, ${rgb.blue}, 0)`);
   context.fillStyle = ambientShadowGradient;
   context.beginPath();
   context.ellipse(
     drawLeft + baseWidth * 0.5 + skewStrength * 0.3,
-    groundY + baseHeight * (0.16 + lengthFactor * 0.16),
+    groundY + baseHeight * (0.08 + lengthFactor * 0.1),
     ambientWidth,
     ambientHeight,
     direction > 0 ? 0.05 : -0.05,
@@ -366,16 +429,16 @@ function drawNaturalShadow(context, sourceCanvas, box, crop, drawRect) {
     {
       x: leftWheel.x,
       y: leftGroundY,
-      width: baseWidth * (0.07 + lengthFactor * 0.07),
-      height: baseHeight * (0.10 + lengthFactor * 0.10),
-      alpha: 0.16 + strength * 0.20
+      width: baseWidth * (0.055 + lengthFactor * 0.04),
+      height: baseHeight * (0.08 + lengthFactor * 0.07),
+      alpha: 0.18 + strength * 0.18
     },
     {
       x: rightWheel.x,
       y: rightGroundY,
-      width: baseWidth * (0.06 + lengthFactor * 0.06),
-      height: baseHeight * (0.09 + lengthFactor * 0.09),
-      alpha: 0.14 + strength * 0.18
+      width: baseWidth * (0.05 + lengthFactor * 0.04),
+      height: baseHeight * (0.075 + lengthFactor * 0.065),
+      alpha: 0.16 + strength * 0.16
     }
   ];
 
@@ -396,10 +459,10 @@ function drawNaturalShadow(context, sourceCanvas, box, crop, drawRect) {
 
   const midCenterX = drawLeft + (leftWheel.x + rightWheel.x) * 0.5 * drawRect.scale + skewStrength * 0.15;
   context.save();
-  context.globalAlpha = 0.08 + strength * 0.08;
+  context.globalAlpha = 0.06 + strength * 0.06;
   context.filter = `blur(${midBlur}px)`;
   const centerGradient = context.createRadialGradient(midCenterX, groundY, 0, midCenterX, groundY, baseWidth * (0.10 + lengthFactor * 0.12));
-  centerGradient.addColorStop(0, `rgba(${rgb.red}, ${rgb.green}, ${rgb.blue}, ${0.12 + strength * 0.10})`);
+  centerGradient.addColorStop(0, `rgba(${rgb.red}, ${rgb.green}, ${rgb.blue}, ${0.10 + strength * 0.08})`);
   centerGradient.addColorStop(1, `rgba(${rgb.red}, ${rgb.green}, ${rgb.blue}, 0)`);
   context.fillStyle = centerGradient;
   context.beginPath();
@@ -418,14 +481,14 @@ function drawNaturalShadow(context, sourceCanvas, box, crop, drawRect) {
   for (const [index, wheel] of [leftWheel, rightWheel].entries()) {
     const wheelX = drawLeft + wheel.x * drawRect.scale;
     const wheelY = index === 0 ? leftGroundY : rightGroundY;
-    const major = baseWidth * ((index === 0 ? 0.08 : 0.07) + lengthFactor * 0.05);
-    const minor = baseHeight * ((index === 0 ? 0.24 : 0.22) + blurFactor * 0.16);
+    const major = baseWidth * ((index === 0 ? 0.07 : 0.06) + lengthFactor * 0.03);
+    const minor = baseHeight * ((index === 0 ? 0.18 : 0.17) + blurFactor * 0.12);
 
     context.save();
     context.filter = `blur(${mainBlur}px)`;
     const wheelGradient = context.createRadialGradient(wheelX, wheelY, 0, wheelX, wheelY, major);
-    wheelGradient.addColorStop(0, `rgba(${rgb.red}, ${rgb.green}, ${rgb.blue}, ${0.18 + strength * 0.26})`);
-    wheelGradient.addColorStop(0.45, `rgba(${rgb.red}, ${rgb.green}, ${rgb.blue}, ${0.08 + strength * 0.12})`);
+    wheelGradient.addColorStop(0, `rgba(${rgb.red}, ${rgb.green}, ${rgb.blue}, ${0.16 + strength * 0.18})`);
+    wheelGradient.addColorStop(0.45, `rgba(${rgb.red}, ${rgb.green}, ${rgb.blue}, ${0.07 + strength * 0.08})`);
     wheelGradient.addColorStop(1, `rgba(${rgb.red}, ${rgb.green}, ${rgb.blue}, 0)`);
     context.fillStyle = wheelGradient;
     context.beginPath();
@@ -434,7 +497,7 @@ function drawNaturalShadow(context, sourceCanvas, box, crop, drawRect) {
     context.restore();
 
     context.save();
-    context.globalAlpha = 0.06;
+    context.globalAlpha = 0.035;
     context.filter = "blur(4px)";
     const highlight = context.createRadialGradient(wheelX, wheelY - minor * 0.15, 0, wheelX, wheelY - minor * 0.15, major * 0.7);
     highlight.addColorStop(0, "rgba(255,255,255,0.95)");
@@ -1171,17 +1234,20 @@ function renderStudioComposite(targetContext, targetWidth, targetHeight, sourceC
   targetContext.clearRect(0, 0, targetWidth, targetHeight);
   targetContext.fillStyle = "#ffffff";
   targetContext.fillRect(0, 0, targetWidth, targetHeight);
+  const isolated = isolatePrimarySubjectCanvas(sourceCanvas);
+  const studioSourceCanvas = isolated.canvas;
   const safeBox =
+    isolated.bbox ||
     bbox || {
       x: 0,
       y: 0,
-      width: sourceCanvas.width,
-      height: sourceCanvas.height
+      width: studioSourceCanvas.width,
+      height: studioSourceCanvas.height
     };
-  const placement = resolveStudioPlacement(targetWidth, targetHeight, sourceCanvas, safeBox);
+  const placement = resolveStudioPlacement(targetWidth, targetHeight, studioSourceCanvas, safeBox);
 
   if (options.drawShadow !== false) {
-    drawNaturalShadow(targetContext, sourceCanvas, safeBox, placement.crop, {
+    drawNaturalShadow(targetContext, studioSourceCanvas, safeBox, placement.crop, {
       x: placement.draw.x,
       y: placement.draw.y,
       scale: placement.draw.scale
@@ -1189,7 +1255,7 @@ function renderStudioComposite(targetContext, targetWidth, targetHeight, sourceC
   }
 
   targetContext.drawImage(
-    sourceCanvas,
+    studioSourceCanvas,
     placement.crop.x,
     placement.crop.y,
     placement.crop.width,

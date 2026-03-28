@@ -7,6 +7,11 @@ import { loadProjectEnv } from "./lib/env.js";
 loadProjectEnv(new URL(".", import.meta.url).pathname);
 
 const { getAnalyzerRuntimeConfig, runAnalysisPipeline } = await import("./lib/analyzers.js");
+const {
+  getAliyunImageSegRuntimeConfig,
+  removeBackgroundWithAliyun,
+  renderStudioWithAliyun
+} = await import("./lib/aliyun-imageseg-provider.js");
 const { getRemoveBgRuntimeConfig, removeImageBackground } = await import("./lib/remove-bg-provider.js");
 const {
   getPhotoroomRuntimeConfig,
@@ -139,6 +144,32 @@ function mapCutoutPayload(payload) {
   };
 }
 
+function formatAttemptError(error) {
+  return error instanceof Error ? error.message : String(error || "Unknown provider error");
+}
+
+async function runProviderChain(steps) {
+  const failures = [];
+
+  for (const step of steps) {
+    try {
+      const result = await step.run();
+      return {
+        ...result,
+        fallback_chain: failures.map(({ provider, error }) => ({ provider, error }))
+      };
+    } catch (error) {
+      failures.push({
+        provider: step.provider,
+        error: formatAttemptError(error)
+      });
+    }
+  }
+
+  const summary = failures.map(({ provider, error }) => `${provider}: ${error}`).join(" | ");
+  throw new Error(summary || "No provider available.");
+}
+
 async function handleCutout(request, response) {
   if (request.method !== "POST") {
     sendMethodNotAllowed(response);
@@ -152,13 +183,36 @@ async function handleCutout(request, response) {
     }
 
     const startedAt = performance.now();
+    const aliyun = getAliyunImageSegRuntimeConfig();
     const photoroom = getPhotoroomRuntimeConfig();
-    const result = photoroom.configured ? await removeBackgroundWithPhotoroom(payload) : await removeImageBackground(payload);
+    const result = await runProviderChain([
+      ...(aliyun.configured
+        ? [
+            {
+              provider: "aliyun-imageseg",
+              run: () => removeBackgroundWithAliyun(payload)
+            }
+          ]
+        : []),
+      ...(photoroom.configured
+        ? [
+            {
+              provider: "photoroom",
+              run: () => removeBackgroundWithPhotoroom(payload)
+            }
+          ]
+        : []),
+      {
+        provider: "remove.bg",
+        run: () => removeImageBackground(payload)
+      }
+    ]);
     sendJson(response, 200, {
       image: {
         base64: result.resultBase64,
         mime_type: result.mimeType
       },
+      fallback_chain: result.fallback_chain,
       provider: result.provider,
       runtime: {
         elapsed_ms: Math.round(performance.now() - startedAt)
@@ -184,12 +238,36 @@ async function handleStudio(request, response) {
     }
 
     const startedAt = performance.now();
-    const result = await renderStudioWithPhotoroom(payload);
+    const aliyun = getAliyunImageSegRuntimeConfig();
+    const photoroom = getPhotoroomRuntimeConfig();
+    const result = await runProviderChain([
+      ...(aliyun.configured
+        ? [
+            {
+              provider: "aliyun-imageseg",
+              run: () => renderStudioWithAliyun(payload)
+            }
+          ]
+        : []),
+      ...(photoroom.configured
+        ? [
+            {
+              provider: "photoroom",
+              run: () => renderStudioWithPhotoroom(payload)
+            }
+          ]
+        : []),
+      {
+        provider: "remove.bg",
+        run: () => removeImageBackground(payload)
+      }
+    ]);
     sendJson(response, 200, {
       image: {
         base64: result.resultBase64,
         mime_type: result.mimeType
       },
+      fallback_chain: result.fallback_chain,
       provider: result.provider,
       runtime: {
         elapsed_ms: Math.round(performance.now() - startedAt)
@@ -230,6 +308,7 @@ const server = createServer(async (request, response) => {
   if (url.pathname === "/health") {
     sendJson(response, 200, {
       analyzer: getAnalyzerRuntimeConfig(),
+      aliyun: getAliyunImageSegRuntimeConfig(),
       photoroom: getPhotoroomRuntimeConfig(),
       cutout: getRemoveBgRuntimeConfig(),
       service: "carhome",
@@ -241,6 +320,7 @@ const server = createServer(async (request, response) => {
   if (url.pathname === "/api/config" || url.pathname === "/api/runtime-config") {
     sendJson(response, 200, {
       analyzer: getAnalyzerRuntimeConfig(),
+      aliyun: getAliyunImageSegRuntimeConfig(),
       photoroom: getPhotoroomRuntimeConfig(),
       cutout: getRemoveBgRuntimeConfig()
     });

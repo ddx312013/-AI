@@ -28,5 +28,10 @@
     "self-test": "node scripts/self-test.js",
     "self-test:runtime": "node scripts/runtime-self-test.js",
     "self-test:live": "node scripts/live-test.js"
+  },
+  "dependencies": {
+    "@alicloud/imageseg20191230": "^4.0.1",
+    "@alicloud/openapi-client": "^0.4.15",
+    "@alicloud/tea-util": "^1.4.11"
   }
 }

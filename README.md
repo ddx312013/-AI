@@ -64,6 +64,10 @@ Ubuntu 运维命令清单见 [docs/OPS_UBUNTU.md](docs/OPS_UBUNTU.md)。
 HOST=0.0.0.0
 PORT=3100
 NODE_ENV=production
+ALIYUN_ACCESS_KEY_ID=your_aliyun_access_key_id
+ALIYUN_ACCESS_KEY_SECRET=your_aliyun_access_key_secret
+ALIYUN_REGION_ID=cn-shanghai
+ALIYUN_STUDIO_RETURN_FORM=whiteBK
 PHOTOROOM_API_KEY=your_photoroom_api_key
 PHOTOROOM_ENDPOINT=https://image-api.photoroom.com/v2/edit
 REMOVE_BG_API_KEY=your_remove_bg_api_key
@@ -74,6 +78,9 @@ REMOVE_BG_FORMAT=png
 
 说明：
 
+- `ALIYUN_ACCESS_KEY_ID / ALIYUN_ACCESS_KEY_SECRET`：阿里云商品分割备用 provider
+- `ALIYUN_REGION_ID`：阿里云地域，默认 `cn-shanghai`
+- `ALIYUN_STUDIO_RETURN_FORM`：阿里云商品图优先返回白底版本，默认 `whiteBK`
 - `PHOTOROOM_API_KEY`：推荐的商品图 / 抠图主 provider
 - `PHOTOROOM_ENDPOINT`：Photoroom 接口地址
 - `REMOVE_BG_API_KEY`：备用抠图服务 key，当前内置 `remove.bg`
@@ -83,10 +90,10 @@ REMOVE_BG_FORMAT=png
 
 当前链路：
 
-- `POST /api/cutout`：优先走 `Photoroom` 抠图，未配置时回退到 `remove.bg`
-- `POST /api/studio`：走 `Photoroom` 商品图生成
+- `POST /api/cutout`：优先走 `Photoroom`，失败时回退到阿里云商品分割，再回退到 `remove.bg`
+- `POST /api/studio`：优先走 `Photoroom` 商品图，失败时回退到阿里云白底图，最后回退到 `remove.bg`
 
-如果是团队使用，优先只配 `PHOTOROOM_API_KEY` 即可。
+如果是团队使用，至少配 `PHOTOROOM_API_KEY`，更稳妥时再补 `ALIYUN_ACCESS_KEY_ID / ALIYUN_ACCESS_KEY_SECRET`。
 
 ## 配置 Gemini
 

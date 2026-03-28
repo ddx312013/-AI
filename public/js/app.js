@@ -7,6 +7,16 @@ const featherRange = document.querySelector("#feather-range");
 const featherValue = document.querySelector("#feather-value");
 const brushSizeRange = document.querySelector("#brush-size-range");
 const brushSizeValue = document.querySelector("#brush-size-value");
+const shadowStrengthRange = document.querySelector("#shadow-strength-range");
+const shadowStrengthValue = document.querySelector("#shadow-strength-value");
+const shadowBlurRange = document.querySelector("#shadow-blur-range");
+const shadowBlurValue = document.querySelector("#shadow-blur-value");
+const shadowLengthRange = document.querySelector("#shadow-length-range");
+const shadowLengthValue = document.querySelector("#shadow-length-value");
+const shadowMoveRange = document.querySelector("#shadow-move-range");
+const shadowMoveValue = document.querySelector("#shadow-move-value");
+const shadowColorInput = document.querySelector("#shadow-color-input");
+const shadowColorValue = document.querySelector("#shadow-color-value");
 const eraseButton = document.querySelector("#erase-button");
 const restoreButton = document.querySelector("#restore-button");
 const undoButton = document.querySelector("#undo-button");
@@ -67,7 +77,15 @@ let currentBackground = null;
 let currentThreshold = null;
 let currentEdgeThreshold = null;
 let currentStudioApiDataUrl = null;
+let currentStudioProvider = "local-template";
 let currentTemplateMode = "auto";
+let currentShadowSettings = {
+  strength: 0.52,
+  blur: 0.38,
+  length: 0.4,
+  offset: 2,
+  color: "#50545C"
+};
 let brushMode = "erase";
 let isPainting = false;
 let undoStack = [];
@@ -182,6 +200,24 @@ function setDownloadState(enabled, url = null) {
   downloadLink.href = enabled && url ? url : "/";
 }
 
+function clamp01(value) {
+  return Math.max(0, Math.min(1, value));
+}
+
+function hexToRgb(hex) {
+  const normalized = String(hex || "")
+    .trim()
+    .replace(/^#/, "");
+  const full = normalized.length === 3 ? normalized.split("").map((char) => `${char}${char}`).join("") : normalized;
+  const safe = /^[0-9a-f]{6}$/iu.test(full) ? full : "4B4F57";
+
+  return {
+    red: parseInt(safe.slice(0, 2), 16),
+    green: parseInt(safe.slice(2, 4), 16),
+    blue: parseInt(safe.slice(4, 6), 16)
+  };
+}
+
 function drawNaturalShadow(context, sourceCanvas, box, crop, drawRect) {
   if (!box) {
     return;
@@ -259,19 +295,32 @@ function drawNaturalShadow(context, sourceCanvas, box, crop, drawRect) {
   const leftWheel = wheelAnchors[0] || { x: localWidth * 0.24 };
   const rightWheel = wheelAnchors[1] || { x: localWidth * 0.8 };
   const direction = rightWheel.x > leftWheel.x ? 1 : -1;
-  const groundY = drawBottom + baseHeight * 0.02;
-  const leftGroundY = groundY + baseHeight * 0.07;
-  const rightGroundY = groundY - baseHeight * 0.03;
+  const rgb = hexToRgb(currentShadowSettings.color);
+  const strength = clamp01(currentShadowSettings.strength);
+  const blurFactor = clamp01(currentShadowSettings.blur);
+  const lengthFactor = clamp01(currentShadowSettings.length);
+  const verticalOffset = currentShadowSettings.offset;
+  const groundY = drawBottom - baseHeight * 0.03 + verticalOffset;
+  const leftGroundY = groundY + baseHeight * 0.05;
+  const rightGroundY = groundY - baseHeight * 0.02;
   const contourStart = Math.max(0, Math.floor(leftWheel.x - localWidth * 0.18));
   const contourEnd = Math.min(localWidth - 1, Math.ceil(rightWheel.x + localWidth * 0.14));
-  const skewStrength = baseWidth * 0.05 * direction;
+  const skewStrength = baseWidth * (0.02 + lengthFactor * 0.08) * direction;
+  const mainBlur = 4 + blurFactor * 12;
+  const ambientBlur = 12 + blurFactor * 24;
+  const wheelBlur = 3 + blurFactor * 8;
+  const midBlur = 6 + blurFactor * 10;
+  const tailDepth = baseHeight * (0.12 + lengthFactor * 0.28);
+  const tailLift = baseHeight * (0.06 + lengthFactor * 0.14);
+  const ambientWidth = baseWidth * (0.16 + lengthFactor * 0.22);
+  const ambientHeight = baseHeight * (0.12 + lengthFactor * 0.22);
 
   context.save();
-  context.filter = "blur(8px)";
-  const mainShadowGradient = context.createLinearGradient(0, drawBottom - baseHeight * 0.05, 0, drawBottom + baseHeight * 0.95);
-  mainShadowGradient.addColorStop(0, "rgba(42, 46, 52, 0.30)");
-  mainShadowGradient.addColorStop(0.35, "rgba(70, 76, 84, 0.18)");
-  mainShadowGradient.addColorStop(1, "rgba(175, 182, 190, 0)");
+  context.filter = `blur(${mainBlur}px)`;
+  const mainShadowGradient = context.createLinearGradient(0, drawBottom - baseHeight * 0.05, 0, drawBottom + baseHeight * 1.05);
+  mainShadowGradient.addColorStop(0, `rgba(${rgb.red}, ${rgb.green}, ${rgb.blue}, ${0.18 + strength * 0.24})`);
+  mainShadowGradient.addColorStop(0.38, `rgba(${rgb.red}, ${rgb.green}, ${rgb.blue}, ${0.10 + strength * 0.12})`);
+  mainShadowGradient.addColorStop(1, `rgba(${rgb.red}, ${rgb.green}, ${rgb.blue}, 0)`);
   context.fillStyle = mainShadowGradient;
   context.beginPath();
   for (let x = contourStart; x <= contourEnd; x += 1) {
@@ -286,7 +335,7 @@ function drawNaturalShadow(context, sourceCanvas, box, crop, drawRect) {
   for (let x = contourEnd; x >= contourStart; x -= 1) {
     const progress = (x - contourStart) / Math.max(1, contourEnd - contourStart);
     const px = drawLeft + x * drawRect.scale + skewStrength * progress;
-    const py = drawTop + smoothedContactRow[x] * drawRect.scale + baseHeight * (0.24 + progress * 0.18);
+    const py = drawTop + smoothedContactRow[x] * drawRect.scale + tailDepth + progress * tailLift;
     context.lineTo(px, py);
   }
   context.closePath();
@@ -294,18 +343,18 @@ function drawNaturalShadow(context, sourceCanvas, box, crop, drawRect) {
   context.restore();
 
   context.save();
-  context.globalAlpha = 0.10;
-  context.filter = "blur(22px)";
+  context.globalAlpha = 0.08 + strength * 0.08;
+  context.filter = `blur(${ambientBlur}px)`;
   const ambientShadowGradient = context.createLinearGradient(0, groundY, 0, groundY + baseHeight * 1.6);
-  ambientShadowGradient.addColorStop(0, "rgba(80, 88, 98, 0.16)");
-  ambientShadowGradient.addColorStop(1, "rgba(180, 188, 198, 0)");
+  ambientShadowGradient.addColorStop(0, `rgba(${rgb.red}, ${rgb.green}, ${rgb.blue}, ${0.10 + strength * 0.08})`);
+  ambientShadowGradient.addColorStop(1, `rgba(${rgb.red}, ${rgb.green}, ${rgb.blue}, 0)`);
   context.fillStyle = ambientShadowGradient;
   context.beginPath();
   context.ellipse(
     drawLeft + baseWidth * 0.5 + skewStrength * 0.3,
-    groundY + baseHeight * 0.42,
-    baseWidth * 0.28,
-    baseHeight * 0.28,
+    groundY + baseHeight * (0.16 + lengthFactor * 0.16),
+    ambientWidth,
+    ambientHeight,
     direction > 0 ? 0.05 : -0.05,
     0,
     Math.PI * 2
@@ -314,18 +363,30 @@ function drawNaturalShadow(context, sourceCanvas, box, crop, drawRect) {
   context.restore();
 
   const wheelSegments = [
-    { x: leftWheel.x, y: leftGroundY, width: baseWidth * 0.11, height: baseHeight * 0.20, alpha: 0.28 },
-    { x: rightWheel.x, y: rightGroundY, width: baseWidth * 0.09, height: baseHeight * 0.18, alpha: 0.24 }
+    {
+      x: leftWheel.x,
+      y: leftGroundY,
+      width: baseWidth * (0.07 + lengthFactor * 0.07),
+      height: baseHeight * (0.10 + lengthFactor * 0.10),
+      alpha: 0.16 + strength * 0.20
+    },
+    {
+      x: rightWheel.x,
+      y: rightGroundY,
+      width: baseWidth * (0.06 + lengthFactor * 0.06),
+      height: baseHeight * (0.09 + lengthFactor * 0.09),
+      alpha: 0.14 + strength * 0.18
+    }
   ];
 
   for (const segment of wheelSegments) {
     const centerX = drawLeft + segment.x * drawRect.scale;
     context.save();
-    context.filter = "blur(5px)";
+    context.filter = `blur(${wheelBlur}px)`;
     const gradient = context.createRadialGradient(centerX, segment.y, 0, centerX, segment.y, segment.width);
-    gradient.addColorStop(0, `rgba(38, 42, 48, ${segment.alpha})`);
-    gradient.addColorStop(0.5, `rgba(68, 74, 82, ${segment.alpha * 0.45})`);
-    gradient.addColorStop(1, "rgba(175, 182, 190, 0)");
+    gradient.addColorStop(0, `rgba(${rgb.red}, ${rgb.green}, ${rgb.blue}, ${segment.alpha})`);
+    gradient.addColorStop(0.55, `rgba(${rgb.red}, ${rgb.green}, ${rgb.blue}, ${segment.alpha * 0.45})`);
+    gradient.addColorStop(1, `rgba(${rgb.red}, ${rgb.green}, ${rgb.blue}, 0)`);
     context.fillStyle = gradient;
     context.beginPath();
     context.ellipse(centerX, segment.y, segment.width, segment.height, direction > 0 ? 0.04 : -0.04, 0, Math.PI * 2);
@@ -335,29 +396,37 @@ function drawNaturalShadow(context, sourceCanvas, box, crop, drawRect) {
 
   const midCenterX = drawLeft + (leftWheel.x + rightWheel.x) * 0.5 * drawRect.scale + skewStrength * 0.15;
   context.save();
-  context.globalAlpha = 0.10;
-  context.filter = "blur(10px)";
-  const centerGradient = context.createRadialGradient(midCenterX, groundY, 0, midCenterX, groundY, baseWidth * 0.14);
-  centerGradient.addColorStop(0, "rgba(58, 64, 72, 0.16)");
-  centerGradient.addColorStop(1, "rgba(180, 188, 198, 0)");
+  context.globalAlpha = 0.08 + strength * 0.08;
+  context.filter = `blur(${midBlur}px)`;
+  const centerGradient = context.createRadialGradient(midCenterX, groundY, 0, midCenterX, groundY, baseWidth * (0.10 + lengthFactor * 0.12));
+  centerGradient.addColorStop(0, `rgba(${rgb.red}, ${rgb.green}, ${rgb.blue}, ${0.12 + strength * 0.10})`);
+  centerGradient.addColorStop(1, `rgba(${rgb.red}, ${rgb.green}, ${rgb.blue}, 0)`);
   context.fillStyle = centerGradient;
   context.beginPath();
-  context.ellipse(midCenterX, groundY + baseHeight * 0.06, baseWidth * 0.14, baseHeight * 0.10, 0, 0, Math.PI * 2);
+  context.ellipse(
+    midCenterX,
+    groundY + baseHeight * 0.02,
+    baseWidth * (0.10 + lengthFactor * 0.10),
+    baseHeight * (0.05 + lengthFactor * 0.07),
+    0,
+    0,
+    Math.PI * 2
+  );
   context.fill();
   context.restore();
 
   for (const [index, wheel] of [leftWheel, rightWheel].entries()) {
     const wheelX = drawLeft + wheel.x * drawRect.scale;
     const wheelY = index === 0 ? leftGroundY : rightGroundY;
-    const major = baseWidth * (index === 0 ? 0.14 : 0.12);
-    const minor = baseHeight * (index === 0 ? 0.52 : 0.46);
+    const major = baseWidth * ((index === 0 ? 0.08 : 0.07) + lengthFactor * 0.05);
+    const minor = baseHeight * ((index === 0 ? 0.24 : 0.22) + blurFactor * 0.16);
 
     context.save();
-    context.filter = "blur(8px)";
+    context.filter = `blur(${mainBlur}px)`;
     const wheelGradient = context.createRadialGradient(wheelX, wheelY, 0, wheelX, wheelY, major);
-    wheelGradient.addColorStop(0, "rgba(45, 48, 54, 0.36)");
-    wheelGradient.addColorStop(0.45, "rgba(70, 75, 82, 0.18)");
-    wheelGradient.addColorStop(1, "rgba(160, 170, 180, 0)");
+    wheelGradient.addColorStop(0, `rgba(${rgb.red}, ${rgb.green}, ${rgb.blue}, ${0.18 + strength * 0.26})`);
+    wheelGradient.addColorStop(0.45, `rgba(${rgb.red}, ${rgb.green}, ${rgb.blue}, ${0.08 + strength * 0.12})`);
+    wheelGradient.addColorStop(1, `rgba(${rgb.red}, ${rgb.green}, ${rgb.blue}, 0)`);
     context.fillStyle = wheelGradient;
     context.beginPath();
     context.ellipse(wheelX, wheelY, major, minor, index === 0 ? -0.08 : 0.06, 0, Math.PI * 2);
@@ -383,6 +452,11 @@ function updateRangeLabels() {
   aggressivenessValue.textContent = aggressivenessRange.value;
   featherValue.textContent = `${featherRange.value} px`;
   brushSizeValue.textContent = `${brushSizeRange.value} px`;
+  shadowStrengthValue.textContent = `${shadowStrengthRange.value}%`;
+  shadowBlurValue.textContent = `${shadowBlurRange.value}%`;
+  shadowLengthValue.textContent = `${shadowLengthRange.value}%`;
+  shadowMoveValue.textContent = `${shadowMoveRange.value} px`;
+  shadowColorValue.textContent = String(shadowColorInput.value || "").toUpperCase();
 }
 
 function setBrushMode(mode) {
@@ -1190,12 +1264,8 @@ async function commitRender(isEdited = false) {
 
   buildCutoutCanvas(currentImageElement, currentAlphaMask, currentImageData.width, currentImageData.height);
   const bbox = getBoundingBox(currentForegroundMask || createForegroundFromAlpha(currentAlphaMask), currentImageData.width, currentImageData.height);
-  if (!isEdited && currentStudioApiDataUrl) {
-    await renderStudioFromApi(currentStudioApiDataUrl, bbox);
-  } else {
-    buildStudioCanvas(bbox);
-    await updateDownloadFromCanvas();
-  }
+  buildStudioCanvas(bbox);
+  await updateDownloadFromCanvas();
   renderEditablePreview();
   const summary = summarizeResult({
     foreground: currentForegroundMask || createForegroundFromAlpha(currentAlphaMask),
@@ -1215,6 +1285,21 @@ async function handleTemplateModeChange(event) {
   currentTemplateMode = event.target.value;
   if (currentImageElement && currentImageData && currentAlphaMask) {
     await commitRender(false);
+  }
+}
+
+async function handleShadowControlChange() {
+  currentShadowSettings = {
+    strength: Number(shadowStrengthRange.value) / 100,
+    blur: Number(shadowBlurRange.value) / 100,
+    length: Number(shadowLengthRange.value) / 100,
+    offset: Number(shadowMoveRange.value),
+    color: String(shadowColorInput.value || "#4B4F57").toUpperCase()
+  };
+  updateRangeLabels();
+  if (currentImageElement && currentImageData && currentAlphaMask) {
+    await commitRender(true);
+    setStatus("已按当前阴影参数更新商品图。", "success");
   }
 }
 
@@ -1324,8 +1409,9 @@ async function processCurrentFile() {
     URL.revokeObjectURL(localUrl);
     currentImageElement = image;
 
-    const [cutoutResult, studioResult] = await Promise.all([requestCutout(currentFile), requestStudio(currentFile)]);
-    currentStudioApiDataUrl = `data:${studioResult.image.mime_type};base64,${studioResult.image.base64}`;
+    const cutoutResult = await requestCutout(currentFile);
+    currentStudioApiDataUrl = null;
+    currentStudioProvider = "local-template";
     const cutoutUrl = `data:${cutoutResult.image.mime_type};base64,${cutoutResult.image.base64}`;
     const cutoutImage = await loadImage(cutoutUrl);
     const fitted = fitSize(image.naturalWidth, image.naturalHeight);
@@ -1360,7 +1446,19 @@ async function processCurrentFile() {
     updateUndoState();
 
     await commitRender(false);
-    setStatus(`模型商品图已生成。cutout: ${cutoutResult.provider} · studio: ${studioResult.provider}`, "success");
+
+    try {
+      const studioResult = await requestStudio(currentFile);
+      currentStudioApiDataUrl = `data:${studioResult.image.mime_type};base64,${studioResult.image.base64}`;
+      currentStudioProvider = studioResult.provider || "studio-api";
+      setStatus(`商品图已生成。抠图: ${cutoutResult.provider} · 阴影: 本地模版 · 增强: ${currentStudioProvider}`, "success");
+    } catch (studioError) {
+      currentStudioApiDataUrl = null;
+      currentStudioProvider = "local-template";
+      const studioMessage = studioError instanceof Error ? studioError.message : "外部商品图增强失败";
+      setStatus(`商品图已生成。抠图: ${cutoutResult.provider} · 阴影: 本地模版 · 增强已跳过`, "success");
+      console.warn("Studio enhancement skipped:", studioMessage);
+    }
   } catch (error) {
     summaryCard.className = "summary-card empty";
     summaryCard.textContent = "抠图失败";
@@ -1435,6 +1533,11 @@ templateModeInputs.forEach((input) => {
 aggressivenessRange.addEventListener("input", updateRangeLabels);
 featherRange.addEventListener("input", updateRangeLabels);
 brushSizeRange.addEventListener("input", updateRangeLabels);
+shadowStrengthRange.addEventListener("input", handleShadowControlChange);
+shadowBlurRange.addEventListener("input", handleShadowControlChange);
+shadowLengthRange.addEventListener("input", handleShadowControlChange);
+shadowMoveRange.addEventListener("input", handleShadowControlChange);
+shadowColorInput.addEventListener("input", handleShadowControlChange);
 
 ["dragenter", "dragover"].forEach((eventName) => {
   dropzone.addEventListener(eventName, (event) => {
